@@ -15,8 +15,6 @@
 
 NSString *const kAVIMConversationOperationQuery = @"query";
 
-static uint16_t _searial_id = 0;
-
 @implementation AVIMGenericCommand (AVIMMessagesAdditions)
 
 - (AVIMCommandResultBlock)callback {
@@ -74,10 +72,6 @@ static uint16_t _searial_id = 0;
             self.errorMessage = (AVIMErrorCommand *)command;
             break;
             
-        case AVIMCommandType_Login:
-            self.loginMessage = (AVIMLoginCommand *)command;
-            break;
-            
         case AVIMCommandType_Data:
             self.dataMessage = (AVIMDataCommand *)command;
             break;
@@ -96,6 +90,9 @@ static uint16_t _searial_id = 0;
             
         case AVIMCommandType_Report:
             self.reportMessage = (AVIMReportCommand *)command;
+            break;
+            
+        default:
             break;
     }
 }
@@ -131,19 +128,6 @@ static uint16_t _searial_id = 0;
         self.directMessage.transient = transient;
         self.directMessage.message = message;
     }
-}
-
-- (void)avim_addOrRefreshSerialId {
-    self.i = [[self class] nextSerialId];
-}
-
-+ (uint16_t)nextSerialId {
-    if (_searial_id == 0) {
-        ++_searial_id;
-    }
-    uint16_t result = _searial_id;
-    _searial_id = (_searial_id + 1) % (UINT16_MAX + 1);
-    return result;
 }
 
 - (BOOL)avim_validateCommand:(NSError **)error {
@@ -411,10 +395,6 @@ static uint16_t _searial_id = 0;
             result = self.errorMessage;
             break;
             
-        case AVIMCommandType_Login:
-            result = self.loginMessage;
-            break;
-            
         case AVIMCommandType_Data:
             result = self.dataMessage;
             break;
@@ -434,6 +414,9 @@ static uint16_t _searial_id = 0;
         case AVIMCommandType_Report:
             result = self.reportMessage;
             break;
+            
+        default:
+            break;
     }
     return result;
 }
@@ -447,6 +430,7 @@ static uint16_t _searial_id = 0;
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:NULL];
     [command setObject:[NSMutableDictionary dictionaryWithDictionary:json] forKey:@"where"];
     [command setObject:self.convMessage.sort forKey:@"sort"];
+    [command setObject:@(self.convMessage.flag) forKey:@"option"];
     
     if (self.convMessage.hasSkip) {
         [command setObject:@(self.convMessage.skip) forKey:@"skip"];

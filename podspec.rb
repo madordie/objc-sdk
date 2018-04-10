@@ -106,8 +106,13 @@ module Podspec
     # Convert pathnames to file list string.
     def file_list_string(pathnames, indent)
       spaces = ' ' * indent
-      paths  = pathnames.map { |pathname| "'#{pathname.to_s}'" }
-      paths.join(",\n#{spaces}")
+
+      unless pathnames.empty?
+        paths  = pathnames.map { |pathname| "'#{pathname.to_s}'" }
+        paths.join(",\n#{spaces}")
+      else
+        spaces += '[]'
+      end
     end
 
     # Write content to file.
@@ -158,7 +163,11 @@ module Podspec
     def generateAVOSCloudIM()
       header_files        = header_files('AVOSCloudIM-iOS')
       source_files        = source_files('AVOSCloudIM-iOS')
-      no_arc_files        = [Pathname.new('AVOS/AVOSCloudIM/Protobuf/*.{h,m}'), Pathname.new('AVOS/AVOSCloudIM/Commands/MessagesProtoOrig.pbobjc.{h,m}')]
+      no_arc_files        = [
+        Pathname.new('AVOS/AVOSCloudIM/Protobuf/*.{h,m}'),
+        Pathname.new('AVOS/AVOSCloudIM/Protobuf/google/protobuf/*.{h,m}'),
+        Pathname.new('AVOS/AVOSCloudIM/Commands/MessagesProtoOrig.pbobjc.{h,m}')
+      ]
       public_header_files = public_header_files('AVOSCloudIM-iOS')
 
       template = File.read('Podspec/AVOSCloudIM.podspec.mustache')
@@ -173,6 +182,23 @@ module Podspec
       }
 
       write 'AVOSCloudIM.podspec', podspec
+    end
+
+    # Generate IM Group Chat podspec.
+    def generateAVOSCloudIMGroupChat()
+      header_files        = header_files('AVOSCloudIMGroupChat')
+      source_files        = source_files('AVOSCloudIMGroupChat')
+      public_header_files = public_header_files('AVOSCloudIMGroupChat')
+
+      template = File.read('Podspec/AVOSCloudIMGroupChat.podspec.mustache')
+
+      podspec = Mustache.render template, {
+        'version' => version,
+        'source_files' => file_list_string(header_files + source_files, 4),
+        'public_header_files' => file_list_string(public_header_files, 4),
+      }
+
+      write 'AVOSCloudIMGroupChat.podspec', podspec
     end
 
     # Generate crash reporting podspec.
@@ -208,10 +234,30 @@ module Podspec
       write 'AVOSCloudCrashReporting.podspec', podspec
     end
 
+    # Generate live query podspec.
+    def generateAVOSCloudLiveQuery()
+      header_files = header_files('AVOSCloudLiveQuery-iOS')
+      source_files = source_files('AVOSCloudLiveQuery-macOS')
+
+      public_header_files = public_header_files('AVOSCloudLiveQuery-iOS')
+
+      template = File.read('Podspec/AVOSCloudLiveQuery.podspec.mustache')
+
+      podspec = Mustache.render template, {
+        'version' => version,
+        'source_files' => "'AVOS/AVOSCloudLiveQuery/**/*.{h,m}'",
+        'public_header_files' => file_list_string(public_header_files, 4)
+      }
+
+      write 'AVOSCloudLiveQuery.podspec', podspec
+    end
+
     def generate()
       generateAVOSCloud
       generateAVOSCloudIM
+      generateAVOSCloudIMGroupChat
       generateAVOSCloudCrashReporting
+      generateAVOSCloudLiveQuery
     end
   end
 end

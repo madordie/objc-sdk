@@ -13,32 +13,40 @@
 
 #define AVIMAttr(attr) ([NSString stringWithFormat:@"attr.%@", attr])
 
-extern NSString *const kAVIMKeyName;
-extern NSString *const kAVIMKeyMember;
-extern NSString *const kAVIMKeyCreator;
-extern NSString *const kAVIMKeyConversationId;
+NS_ASSUME_NONNULL_BEGIN
+
+typedef NS_OPTIONS(uint64_t, AVIMConversationQueryOption) {
+    AVIMConversationQueryOptionNone = 0,
+    AVIMConversationQueryOptionCompact = 1 << 0, /**< 不返回成员列表 */
+    AVIMConversationQueryOptionWithMessage = 1 << 1, /**< 返回对话最近一条消息 */
+};
 
 @interface AVIMConversationQuery : NSObject
 
 /*!
  限制结果数量
  */
-@property (nonatomic) NSInteger limit;
+@property (nonatomic, assign) NSInteger limit;
 
 /*!
  返回此位置开始的结果
  */
-@property (nonatomic) NSInteger skip;
+@property (nonatomic, assign) NSInteger skip;
 
 /*!
  设置缓存策略，默认是 kAVCachePolicyCacheElseNetwork
  */
-@property (nonatomic) AVIMCachePolicy cachePolicy;
+@property (nonatomic, assign) AVIMCachePolicy cachePolicy;
 
 /*!
  设置缓存的过期时间，默认是 1 小时（1 * 60 * 60）
  */
-@property (nonatomic) NSTimeInterval cacheMaxAge;
+@property (nonatomic, assign) NSTimeInterval cacheMaxAge;
+
+/*!
+ * 查询条件
+ */
+@property (nonatomic, assign) AVIMConversationQueryOption option;
 
 /*!
  * Build an query that is the OR of the passed in queries.
@@ -181,7 +189,7 @@ extern NSString *const kAVIMKeyConversationId;
  @param regex 需要匹配的正则
  @param modifiers 支持 PCRE 修饰：<br><code>i</code> - 忽略大小写<br><code>m</code> - 跨行匹配
  */
-- (void)whereKey:(NSString *)key matchesRegex:(NSString *)regex modifiers:(NSString *)modifiers;
+- (void)whereKey:(NSString *)key matchesRegex:(NSString *)regex modifiers:(nullable NSString *)modifiers;
 
 /*!
  添加字符串包含条件
@@ -263,4 +271,14 @@ extern NSString *const kAVIMKeyConversationId;
  */
 - (void)findConversationsWithCallback:(AVIMArrayResultBlock)callback;
 
+/**
+ Query array of `AVIMTemporaryConversation` info. if not set `limit`, or `limit` invalid, return 10 or less in default.
+ @param tempConvIds Array of queried conversation's id.
+ @param callback Result of callback.
+ */
+- (void)findTemporaryConversationsWith:(NSArray<NSString *> *)tempConvIds
+                              callback:(AVIMArrayResultBlock)callback;
+
 @end
+
+NS_ASSUME_NONNULL_END

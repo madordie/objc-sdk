@@ -10,6 +10,8 @@
 
 @interface AVIMMessage ()
 
+@property (nonatomic, assign) AVIMMessageMediaType mediaType;
+
 /*!
  * Wether message has breakpoint or not
  */
@@ -36,9 +38,16 @@
 @property (nonatomic, assign) BOOL transient;
 
 /*!
+ The message update time.
+ */
+@property (nonatomic, strong) NSDate *updatedAt;
+
+/*!
  * Payload of current message, it is a JSON string or plain text message
  */
 - (NSString *)payload;
+
++ (instancetype)parseMessageWithConversationId:(NSString *)conversationId result:(NSDictionary *)result;
 
 //======================================================================
 //====== override readonly property to readwrite for internal use ======
@@ -52,5 +61,12 @@
 @property (nonatomic, copy) NSString *clientId;
 /*消息所属对话的 id*/
 @property (nonatomic, copy) NSString *conversationId;
+
+@property (nonatomic, assign) int64_t sendTimestamp;
+@property (nonatomic, assign) int64_t deliveredTimestamp;
+@property (nonatomic, assign) int64_t readTimestamp;
+
+/* Sequence number in cache store. */
+@property (nonatomic, assign) long long seq;
 
 @end

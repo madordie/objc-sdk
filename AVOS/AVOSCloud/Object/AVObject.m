@@ -10,7 +10,6 @@
 #import "AVACL.h"
 #import "AVACL_Internal.h"
 #import "AVGeoPoint_Internal.h"
-#import "AVFile_Internal.h"
 #import "AVObjectUtils.h"
 #import "AVErrorUtils.h"
 #import "AVQuery_Internal.h"
@@ -26,6 +25,7 @@
 
 #import "AVUser_Internal.h"
 #import "SDMacros.h"
+#import "EXTScope.h"
 
 #define AV_BATCH_SAVE_SIZE 100
 #define AV_BATCH_CONCURRENT_SIZE 20
@@ -195,18 +195,11 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     static NSArray *_invalidKeys;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        _invalidKeys = @[@"code",
-                         @"uuid",
-                         @"className",
-                         @"keyValues",
-                         @"fetchWhenSave",
-                         @"running",
-                         @"acl",
-                         @"ACL",
-                         @"pendingKeys",
-                         @"createdAt",
-                         @"updatedAt",
-                         @"objectId"];
+        _invalidKeys = @[
+            @"objectId",
+            @"createdAt",
+            @"updatedAt"
+        ];
     });
     return _invalidKeys;
 }
@@ -235,6 +228,34 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
         self.className = newClassName;
     }
     return self;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)aDecoder {
+    self = [self init];
+
+    if (self) {
+        _ACL = [aDecoder decodeObjectForKey:@"ACL"];
+        _objectId = [aDecoder decodeObjectForKey:@"objectId"];
+        _createdAt = [aDecoder decodeObjectForKey:@"createdAt"];
+        _updatedAt = [aDecoder decodeObjectForKey:@"updatedAt"];
+        _className = [aDecoder decodeObjectForKey:@"className"];
+        _localData = [[aDecoder decodeObjectForKey:@"localData"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        _estimatedData = [[aDecoder decodeObjectForKey:@"estimatedData"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        _relationData = [[aDecoder decodeObjectForKey:@"relationData"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    }
+
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {
+    [aCoder encodeObject:_ACL forKey:@"ACL"];
+    [aCoder encodeObject:_objectId forKey:@"objectId"];
+    [aCoder encodeObject:_createdAt forKey:@"createdAt"];
+    [aCoder encodeObject:_updatedAt forKey:@"updatedAt"];
+    [aCoder encodeObject:_className forKey:@"className"];
+    [aCoder encodeObject:_localData forKey:@"localData"];
+    [aCoder encodeObject:_estimatedData forKey:@"estimatedData"];
+    [aCoder encodeObject:_relationData forKey:@"relationData"];
 }
 
 -(NSArray *)allArray
@@ -298,15 +319,19 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 }
 
 - (void)updateValue:(id)value forKey:(NSString *)key {
-    if ([AVUtils containsProperty:key inClass:[self class] containSuper:YES filterDynamic:YES]) {
-        self.inSetter = YES;
-        [self setValue:value forKey:key];
-        self.inSetter = NO;
-    } else {
-        if (value) {
-            [self.localData setObject:value forKey:key];
+    @synchronized (self) {
+        if (!key)
+            return;
+        if ([AVUtils containsProperty:key inClass:[self class] containSuper:YES filterDynamic:YES]) {
+            self.inSetter = YES;
+            [self setValue:value forKey:key];
+            self.inSetter = NO;
         } else {
-            [self.localData removeObjectForKey:key];
+            if (value) {
+                [self.localData setObject:value forKey:key];
+            } else {
+                [self.localData removeObjectForKey:key];
+            }
         }
     }
 }
@@ -335,12 +360,14 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 - (void)setObject:(id)object forKey:(NSString *)key
 {
-    if ([[[self class] invalidKeys] containsObject:key]) {
-        NSError *error = [NSError errorWithDomain:kAVErrorDomain code:0 userInfo:@{@"text":[NSString stringWithFormat:@"Don't use an internal key name:%@", key]}];
-        AVLoggerE(@"fail to set object for key, error: %@", error);
-        NSException *exception = [NSException exceptionWithName:kAVErrorDomain reason:[NSString stringWithFormat:@"Invalid key name:%@", key] userInfo:nil];
-        [exception raise];
+    if ([key isEqualToString:@"ACL"]) {
+        [self setACL:object];
         return;
+    }
+
+    if ([[AVObject invalidKeys] containsObject:key]) {
+        NSException *exception = [NSException exceptionWithName:kAVErrorDomain reason:[NSString stringWithFormat:@"The key '%@' is reserved.", key] userInfo:nil];
+        [exception raise];
     }
     
     if (self.inSetter) {
@@ -357,6 +384,11 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
             hasKey = YES;
         }
         [dic removeObjectForKey:key];
+    }
+    if ([AVUtils containsProperty:key inClass:[self class] containSuper:YES filterDynamic:YES]) {
+        /* Create a clean object to produce an empty value. */
+        [self setValue:[[[self class] alloc] valueForKey:key] forKey:key];
+        hasKey = YES;
     }
     if (hasKey || [self hasValidObjectId]) {
         [self.requestManager unsetRequestForKey:key];
@@ -618,6 +650,11 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 }
 
 -(void)setACL:(AVACL *)ACL {
+    if (ACL && ![ACL isKindOfClass:[AVACL class]]) {
+        NSException *exception = [NSException exceptionWithName:kAVErrorDomain reason:[NSString stringWithFormat:@"An instance of AVACL is required for property 'ACL'."] userInfo:nil];
+        [exception raise];
+    }
+
     _ACL = ACL;
     [self addSetRequest:ACLTag object:ACL.permissionsById];
 }
@@ -640,6 +677,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 - (BOOL)save:(NSError *__autoreleasing *)error
 {
     return [self saveWithOption:nil error:error];
+}
+
+- (BOOL)saveAndThrowsWithError:(NSError * _Nullable __autoreleasing *)error {
+    return [self save:error];
 }
 
 - (BOOL)saveWithOption:(AVSaveOption *)option
@@ -688,6 +729,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
     [self.requestLock lock];
 
+    @onExit {
+        [self.requestLock unlock];
+    };
+
     /* Perform save request. */
     do {
         /* If object is clean, ignore save request. */
@@ -695,10 +740,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
             AVLoggerInfo(AVLoggerDomainStorage, @"Object not changed, ignore save request.");
             break;
         }
-
+        
         /* Firstly, save all related files. */
         NSError *fileError = [self saveNewFiles];
-
+        
         if (fileError) {
             requestError = fileError;
             break;
@@ -720,8 +765,6 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     if (error) {
         *error = requestError;
     }
-
-    [self.requestLock unlock];
 
     return !requestError;
 }
@@ -770,7 +813,9 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 - (void)saveInBackground
 {
-    [self saveInBackgroundWithBlock:nil];
+    [self saveInBackgroundWithBlock:^(BOOL succeeded, NSError * _Nullable error) {
+        /* Ignore result intentionally. */
+    }];
 }
 
 - (void)saveInBackgroundWithBlock:(AVBooleanResultBlock)block
@@ -887,30 +932,30 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 - (NSSet *)allAttachedDirtyFiles {
     NSMutableSet *files = [NSMutableSet set];
-
+    
     [self iterateDescendantObjectsWithBlock:^(id object) {
-        if ([object isKindOfClass:[AVFile class]] && [object isDirty]) {
+        if ([object isKindOfClass:[AVFile class]] && ![(AVFile *)object objectId]) {
             [files addObject:object];
         }
     }];
-
+    
     return files;
 }
 
 - (NSError *)saveNewFiles{
     NSError *error = nil;
     NSSet   *files = [self allAttachedDirtyFiles];
-
+    
     for (AVFile *file in files) {
-        if ([file isDirty]) {
-            [file save:&error];
-
+        if (![file objectId]) {
+            [AVObject saveFile:file];
+            
             if (error) {
                 return error;
             }
         }
     }
-
+    
     return nil;
 }
 
@@ -1089,7 +1134,9 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 - (void)saveEventually
 {
-    [self saveEventually:nil];
+    [self saveEventually:^(BOOL succeeded, NSError * _Nullable error) {
+        /* Ignore result intentionally. */
+    }];
 }
 
 - (void)saveEventually:(AVBooleanResultBlock)callback
@@ -1116,23 +1163,23 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 - (NSArray *)descendantFiles {
     NSMutableSet *files = [NSMutableSet set];
-
+    
     [self iterateDescendantObjectsWithBlock:^(id object) {
-        if ([object isKindOfClass:[AVFile class]] && [object isDirty]) {
+        if ([object isKindOfClass:[AVFile class]] && ![(AVFile *)object objectId]) {
             [files addObject:object];
         }
     }];
-
+    
     return [files allObjects];
 }
 
 + (NSArray *)descendantFilesOfObjects:(NSArray *)objects {
     NSMutableSet *files = [NSMutableSet set];
-
+    
     for (AVObject *object in [objects copy]) {
         [files addObjectsFromArray:[object descendantFiles]];
     }
-
+    
     return [files allObjects];
 }
 
@@ -1179,33 +1226,33 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 + (BOOL)saveDescendantFileOfObjects:(NSArray *)objects error:(NSError **)error {
     NSMutableArray *files = [[self descendantFilesOfObjects:objects] mutableCopy];
-
+    
     __block BOOL saveOK = YES;
     __block NSError *blockError;
-
+    
     while ([files count] && saveOK) {
         __block int32_t uploadCount = 0;
         NSArray *subFiles = [self reduceObjectsFromArray:files count:AV_BATCH_CONCURRENT_SIZE];
-
+        
         for (AVFile *file in subFiles) {
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                NSError *anError = nil;
-
-                if (![file save:&anError]) {
+                
+                NSError *anError = [AVObject saveFile:file];
+                if (anError) {
                     blockError = anError;
                     saveOK = NO;
                 }
-
+                
                 OSAtomicIncrement32(&uploadCount);
             });
         }
-
+        
         AV_WAIT_TIL_TRUE(uploadCount == [subFiles count], 0.1);
     }
     if (blockError && error != NULL) {
         *error = blockError;
     }
-
+    
     return saveOK;
 }
 
@@ -1254,12 +1301,12 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 {
     // Upload descendant files of objects
     NSError *fileUploadError = nil;
-
+    
     if (![self saveDescendantFileOfObjects:objects error:&fileUploadError]) {
         *error = fileUploadError;
         return NO;
     }
-
+    
     // Post descendant batch requests of objects
     NSError *requestPostError = nil;
 
@@ -1273,7 +1320,9 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 
 + (void)saveAllInBackground:(NSArray *)objects
 {
-    [[self class] saveAllInBackground:objects block:NULL];
+    [[self class] saveAllInBackground:objects block:^(BOOL succeeded, NSError * _Nullable error) {
+        /* Ignore result intentionally. */
+    }];
 }
 
 + (void)saveAllInBackground:(NSArray *)objects
@@ -1314,6 +1363,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 - (BOOL)refresh:(NSError **)error
 {
     return [self refreshWithBlock:NULL keys:nil waitUntilDone:YES error:error];
+}
+
+- (BOOL)refreshAndThrowsWithError:(NSError * _Nullable __autoreleasing *)error {
+    return [self refresh:error];
 }
 
 - (void)refreshInBackgroundWithBlock:(AVObjectResultBlock)block {
@@ -1406,6 +1459,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     return [self fetchWithKeys:nil error:error];
 }
 
+- (BOOL)fetchAndThrowsWithError:(NSError * _Nullable __autoreleasing *)error {
+    return [self fetch:error];
+}
+
 - (void)fetchWithKeys:(NSArray *)keys {
     [self fetchWithKeys:keys error:nil];
 }
@@ -1433,6 +1490,10 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 - (AVObject *)fetchIfNeeded:(NSError **)error
 {
     return [self fetchIfNeededWithKeys:nil error:error];
+}
+
+- (AVObject *)fetchIfNeededAndThrowsWithError:(NSError * _Nullable __autoreleasing *)error {
+    return [self fetchIfNeeded:error];
 }
 
 - (AVObject *)fetchIfNeededWithKeys:(NSArray *)keys {
@@ -1665,9 +1726,15 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     return blockError == nil;
 }
 
+- (BOOL)deleteAndThrowsWithError:(NSError * _Nullable __autoreleasing *)error {
+    return [self delete:error];
+}
+
 - (void)deleteInBackground
 {
-    [self deleteInBackgroundWithBlock:NULL];
+    [self deleteInBackgroundWithBlock:^(BOOL succeeded, NSError * _Nullable error) {
+        /* Ignore result intentionally. */
+    }];
 }
 
 - (void)deleteInBackgroundWithBlock:(AVBooleanResultBlock)block {
@@ -1684,7 +1751,7 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     }
     [self.requestManager clear];
     NSString *path = [self myObjectPath];
-    [[AVPaasClient sharedInstance] deleteObject:path withParameters:nil block:^(id object, NSError *error) {
+    [[AVPaasClient sharedInstance] deleteObject:path withParameters:nil eventually:eventually block:^(id object, NSError *error) {
         if (!error) {
             [self postDelete];
         }
@@ -1703,7 +1770,9 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
 }
 
 - (void)deleteEventually {
-    [self deleteEventuallyWithBlock:nil];
+    [self deleteEventuallyWithBlock:^(id  _Nullable object, NSError * _Nullable error) {
+        /* Ignore result intentionally. */
+    }];
 }
 
 - (void)deleteEventuallyWithBlock:(AVIdResultBlock)block {
@@ -1968,6 +2037,24 @@ BOOL requests_contain_request(NSArray *requests, NSDictionary *request) {
     AVObject * otherObject = (AVObject *)other;
     return ([self.objectId isEqualToString:otherObject.objectId] &&
             [self.className isEqualToString:otherObject.className]);
+}
+
++ (NSError *)saveFile:(AVFile *)file
+{
+    __block NSError *aError = nil;
+    __block BOOL waiting = true;
+    
+    [file uploadWithCompletionHandler:^(BOOL succeeded, NSError * _Nullable error) {
+        aError = error;
+        waiting = false;
+    }];
+    
+    while (waiting) {
+        NSDate *date = [NSDate dateWithTimeIntervalSinceNow:1.0];
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:date];
+    }
+    
+    return aError;
 }
 
 #pragma mark - Serialization, Deserialization

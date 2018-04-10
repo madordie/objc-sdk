@@ -22,7 +22,7 @@ typedef void (^AVIMCommandResultBlock)(AVIMGenericCommand *outCommand, AVIMGener
 
 /*!
  序列化时必须要调用。为AVIMGenericCommand对象添加必要的三个字段：needResponse、SerialId、messageObject，，在command完全初始化之后调用
- @param commmand 具体的Command对象
+ @param command 具体的Command对象
  *
  */
 - (void)avim_addRequiredKeyWithCommand:(LCIMMessage *)command;
@@ -48,12 +48,6 @@ typedef void (^AVIMCommandResultBlock)(AVIMGenericCommand *outCommand, AVIMGener
  *
  */
 - (void)avim_addRequiredKeyForDirectMessageWithMessage:(AVIMMessage *)message transient:(BOOL)transient;
-
-/*!
- 为消息创建SerialId
- *
- */
-- (void)avim_addOrRefreshSerialId;
 
 /*!
  序列化时，判断消息是否需要符合要求：包含必要的字段

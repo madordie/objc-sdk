@@ -10,17 +10,24 @@
 #import <AVFoundation/AVFoundation.h>
 
 @class AVIMConversation;
+@class AVIMChatRoom;
+@class AVIMTemporaryConversation;
+
+NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *AVOSCloudIMErrorDomain;
 
-extern NSInteger const kAVIMErrorInvalidCommand;  //非法的请求命令
-extern NSInteger const kAVIMErrorInvalidArguments;  //非法参数
-extern NSInteger const kAVIMErrorConversationNotFound;  //会话未找到
-extern NSInteger const kAVIMErrorTimeout;  //请求超时
-extern NSInteger const kAVIMErrorConnectionLost;  //连接断开
-extern NSInteger const kAVIMErrorInvalidData;  //非法数据
-extern NSInteger const kAVIMErrorMessageTooLong;  //消息内容太长
-extern NSInteger const kAVIMErrorClientNotOpen;  //client 没有打开
+typedef NS_ENUM(NSInteger, AVIMErrorCode) {
+    kAVIMErrorTimeout = 9000,
+    kAVIMErrorConnectionLost,
+    kAVIMErrorClientNotOpen,
+    kAVIMErrorInvalidCommand,
+    kAVIMErrorInvalidArguments,
+    kAVIMErrorMessageNotFound,
+    kAVIMErrorConversationNotFound,
+    kAVIMErrorInvalidData,
+    kAVIMErrorMessageTooLong,
+};
 
 /* AVOSCloud IM code key */
 FOUNDATION_EXPORT NSString *const kAVIMCodeKey;
@@ -31,11 +38,21 @@ FOUNDATION_EXPORT NSString *const kAVIMReasonKey;
 /* AVOSCloud IM detail key */
 FOUNDATION_EXPORT NSString *const kAVIMDetailKey;
 
-typedef void (^AVIMBooleanResultBlock)(BOOL succeeded, NSError *error);
-typedef void (^AVIMIntegerResultBlock)(NSInteger number, NSError *error);
-typedef void (^AVIMArrayResultBlock)(NSArray *objects, NSError *error);
-typedef void (^AVIMConversationResultBlock)(AVIMConversation *conversation, NSError *error);
-typedef void (^AVIMProgressBlock)(NSInteger percentDone);
+typedef void(^AVIMBooleanResultBlock)(BOOL, NSError * _Nullable);
+
+typedef void(^AVIMIntegerResultBlock)(NSInteger, NSError * _Nullable);
+
+typedef void(^AVIMArrayResultBlock)(NSArray * _Nullable, NSError * _Nullable);
+
+typedef void(^AVIMConversationResultBlock)(AVIMConversation * _Nullable, NSError * _Nullable);
+
+typedef void(^AVIMChatRoomResultBlock)(AVIMChatRoom * _Nullable, NSError * _Nullable);
+
+typedef void(^AVIMTemporaryConversationResultBlock)(AVIMTemporaryConversation * _Nullable, NSError * _Nullable);
+
+typedef void(^AVIMProgressBlock)(NSInteger);
+
+NS_ASSUME_NONNULL_END
 
 /* Cache policy */
 typedef NS_ENUM(int, AVIMCachePolicy) {

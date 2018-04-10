@@ -8,38 +8,73 @@
 
 #import "AVIMClient.h"
 #import "AVIMWebSocketWrapper.h"
+#import "LCIMConversationCache.h"
+#import "AVIMConversation_Internal.h"
 
-@interface AVIMClient ()
+@interface AVIMClient () <AVIMWebSocketWrapperDelegate>
 
-+ (NSDictionary *)userOptions;
-+ (dispatch_queue_t)imClientQueue;
++ (NSMutableDictionary *)_userOptions;
+
 + (BOOL)checkErrorForSignature:(AVIMSignature *)signature command:(AVIMGenericCommand *)command;
 + (void)_assertClientIdsIsValid:(NSArray *)clientIds;
 
-@property (nonatomic, copy)   NSString              *clientId;
-@property (nonatomic, assign) AVIMClientStatus       status;
-@property (nonatomic, strong) AVIMWebSocketWrapper  *socketWrapper;
-@property (nonatomic, strong) NSMutableDictionary   *conversations;
-@property (nonatomic, strong) NSMutableDictionary   *messages;
-@property (nonatomic, strong) AVIMGenericCommand    *openCommand;
-@property (nonatomic, assign) int32_t                openTimes;
-@property (nonatomic, copy)   NSString              *tag;
-@property (nonatomic, assign) BOOL                   onceOpened;
+/// Hold the staged message, which is sent by current client and waiting for receipt.
+@property (nonatomic, strong) NSMutableDictionary   *stagedMessages;
+@property (nonatomic, strong) LCIMConversationCache *conversationCache;
 
-- (void)setStatus:(AVIMClientStatus)status;
-- (AVIMConversation *)conversationWithId:(NSString *)conversationId;
-- (void)sendCommand:(AVIMGenericCommand *)command;
-- (AVIMSignature *)signatureWithClientId:(NSString *)clientId conversationId:(NSString *)conversationId action:(NSString *)action actionOnClientIds:(NSArray *)clientIds;
-- (void)addMessage:(AVIMMessage *)message;
-- (void)removeMessageById:(NSString *)messageId;
-- (AVIMMessage *)messageById:(NSString *)messageId;
-
-/*!
- * Cache conversations to memory and sqlite.
- * @param conversations Conversations to be cached.
+/**
+ Conversations's Memory Cache Container.
  */
-- (void)cacheConversations:(NSArray *)conversations;
+@property (nonatomic, strong) NSMutableDictionary *conversationDictionary;
 
-- (void)cacheConversationsIfNeeded:(NSArray *)conversations;
+- (void)sendCommand:(AVIMGenericCommand *)command;
+
+- (void)sendCommandWrapper:(LCIMProtobufCommandWrapper *)commandWrapper;
+
+- (void)stageMessage:(AVIMMessage *)message;
+- (void)unstageMessageForId:(NSString *)messageId;
+- (AVIMMessage *)stagedMessageForId:(NSString *)messageId;
+
+- (void)resetUnreadMessagesCountForConversation:(AVIMConversation *)conversation;
+
+- (void)updateReceipt:(NSDate *)date
+       ofConversation:(AVIMConversation *)conversation
+               forKey:(NSString *)key;
+
+/*
+ Internal Serial Queue
+ */
+- (dispatch_queue_t)internalSerialQueue
+__attribute__((warn_unused_result));
+
+- (void)addOperationToInternalSerialQueue:(void (^)(AVIMClient *client))block;
+
+/*
+ Signature
+ */
+- (AVIMSignature *)getSignatureByDataSourceWithAction:(NSString *)action
+                                       conversationId:(NSString *)conversationId
+                                            clientIds:(NSArray<NSString *> *)clientIds
+__attribute__((warn_unused_result));
+
+/*
+ Conversation Memory Cache
+ */
+- (AVIMConversation *)getConversationWithId:(NSString *)convId
+                              orNewWithType:(LCIMConvType)convType
+__attribute__((warn_unused_result));
+
+/*
+ Thread-unsafe
+ */
+///
+
+- (AVIMClientStatus)threadUnsafe_status
+__attribute__((warn_unused_result));
+
+- (id<AVIMClientDelegate>)threadUnsafe_delegate
+__attribute__((warn_unused_result));
+
+///
 
 @end

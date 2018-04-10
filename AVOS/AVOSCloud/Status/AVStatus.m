@@ -14,7 +14,7 @@
 #import "AVQuery_Internal.h"
 #import "SDMacros.h"
 #import "AVUtils.h"
-
+#import "AVUser_Internal.h"
 
 NSString * const kAVStatusTypeTimeline=@"default";
 NSString * const kAVStatusTypePrivateMessage=@"private";
@@ -22,9 +22,9 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
 @interface AVStatus () {
     
 }
-@property(nonatomic,strong) NSString *objectId;
-@property(nonatomic,strong) NSDate *createdAt;
-@property(nonatomic,assign) NSUInteger messageId;
+@property (nonatomic,   copy) NSString *objectId;
+@property (nonatomic, strong) NSDate *createdAt;
+@property (nonatomic, assign) NSUInteger messageId;
 
 /* 用Query来设定受众群 */
 @property(nonatomic,strong) AVQuery *targetQuery;
@@ -166,7 +166,7 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
 }
 
 +(NSError*)permissionCheck{
-    if (![AVUser currentUser].isAuthenticated) {
+    if (![[AVUser currentUser] isAuthDataExistInMemory]) {
         NSError *error= [AVErrorUtils errorWithCode:kAVErrorUserCannotBeAlteredWithoutSession];
         return error;
     }
@@ -253,10 +253,9 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
     NSString *owner=[AVStatus stringOfStatusOwner:[AVUser currentUser].objectId];
     [[AVPaasClient sharedInstance] getObject:[NSString stringWithFormat:@"statuses/%@",objectId] withParameters:@{@"owner":owner,@"include":@"source"} block:^(id object, NSError *error) {
         
-        if (error) {
-            error=[AVErrorUtils errorFromAVError:error];
-        } else {
-            object=[self statusFromCloudData:object];
+        if (!error) {
+            
+            object = [self statusFromCloudData:object];
         }
         
         [AVUtils callIdResultBlock:callback object:object error:error];
@@ -273,9 +272,6 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
     NSString *owner=[AVStatus stringOfStatusOwner:[AVUser currentUser].objectId];
     [[AVPaasClient sharedInstance] deleteObject:[NSString stringWithFormat:@"statuses/%@",objectId] withParameters:@{@"owner":owner} block:^(id object, NSError *error) {
         
-        if (error) {
-            error=[AVErrorUtils errorFromAVError:error];
-        }
         [AVUtils callBooleanResultBlock:callback error:error];
     }];
 }
@@ -324,8 +320,9 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
 
 +(void)getUnreadStatusesCountWithType:(AVStatusType*)type andCallback:(AVIntegerResultBlock)callback{
     NSError *error=[self permissionCheck];
+
     if (error) {
-        callback(0,error);
+        [AVUtils callIntegerResultBlock:callback number:0 error:error];
         return;
     }
     
@@ -333,10 +330,22 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
     
     [[AVPaasClient sharedInstance] getObject:@"subscribe/statuses/count" withParameters:@{@"owner":owner,@"inboxType":type} block:^(id object, NSError *error) {
         NSUInteger count=[object[@"unread"] integerValue];
-        if (error) {
-            error=[AVErrorUtils errorFromAVError:error];
-        }
         [AVUtils callIntegerResultBlock:callback number:count error:error];
+    }];
+}
+
++ (void)resetUnreadStatusesCountWithType:(AVStatusType *)type andCallback:(AVBooleanResultBlock)callback {
+    NSError *error = [self permissionCheck];
+
+    if (error) {
+        [AVUtils callBooleanResultBlock:callback error:error];
+        return;
+    }
+
+    NSString *owner = [AVStatus stringOfStatusOwner:[AVUser currentUser].objectId];
+
+    [[AVPaasClient sharedInstance] postObject:@"subscribe/statuses/resetUnreadCount" withParameters:@{@"owner": owner, @"inboxType": type} block:^(id object, NSError *error) {
+        [AVUtils callBooleanResultBlock:callback error:error];
     }];
 }
 
@@ -442,7 +451,7 @@ NSString * const kAVStatusTypePrivateMessage=@"private";
          [AVUtils callBooleanResultBlock:block error:[AVErrorUtils errorWithCode:kAVErrorInvalidJSON errorText:@"unexpected result return"]];
      }
      failure:^(NSHTTPURLResponse *response, id responseObject, NSError *error) {
-         [AVUtils callBooleanResultBlock:block error:[AVErrorUtils errorFromJSON:responseObject] ?: error];
+         [AVUtils callBooleanResultBlock:block error:error];
      }];
 }
 

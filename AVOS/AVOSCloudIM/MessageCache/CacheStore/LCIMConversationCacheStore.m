@@ -9,6 +9,7 @@
 #import "LCIMConversationCacheStore.h"
 #import "LCIMConversationCacheStoreSQL.h"
 #import "LCIMMessageCacheStoreSQL.h"
+#import "AVIMClient_Internal.h"
 #import "AVIMConversation.h"
 #import "AVIMConversation_Internal.h"
 #import "LCDatabaseMigrator.h"
@@ -17,39 +18,76 @@
 
 @implementation LCIMConversationCacheStore
 
-- (void)databaseQueueDidLoad {
-    LCIM_OPEN_DATABASE(db, ({
-        [db executeUpdate:LCIM_SQL_CREATE_CONVERSATION_TABLE];
-    }));
-
-    [self migrateDatabaseIfNeeded:self.databaseQueue.path];
++ (NSString *)LCIM_SQL_Delete_Expired_Conversations
+{
+    NSString *sql = [NSString stringWithFormat:@"DELETE FROM %@ WHERE %@ <= ?;",
+                     LCIM_TABLE_CONVERSATION_V2,
+                     LCIM_FIELD_EXPIRE_AT];
+    
+    return sql;
 }
 
-- (void)migrateDatabaseIfNeeded:(NSString *)databasePath {
-    LCDatabaseMigrator *migrator = [[LCDatabaseMigrator alloc] initWithDatabasePath:databasePath];
-
-    [migrator executeMigrations:@[
-        /* Version 1: Add muted column. */
-        [LCDatabaseMigration migrationWithBlock:^(LCDatabase *db) {
-            [db executeUpdate:@"ALTER TABLE conversation ADD COLUMN muted INTEGER"];
-        }]
-    ]];
-}
-
-- (NSArray *)insertionRecordForConversation:(AVIMConversation *)conversation expireAt:(NSTimeInterval)expireAt {
-    return @[
-        conversation.conversationId,
-        conversation.name ?: [NSNull null],
-        conversation.creator ?: [NSNull null],
-        [NSNumber numberWithInteger:conversation.transient],
-        conversation.members ? [conversation.members componentsJoinedByString:@","] : [NSNull null],
-        conversation.attributes ? [NSKeyedArchiver archivedDataWithRootObject:conversation.attributes] : [NSNull null],
-        [NSNumber numberWithDouble:[conversation.createAt timeIntervalSince1970]],
-        [NSNumber numberWithDouble:[conversation.updateAt timeIntervalSince1970]],
-        [NSNumber numberWithDouble:[conversation.lastMessageAt timeIntervalSince1970]],
-        [NSNumber numberWithInteger:conversation.muted],
-        [NSNumber numberWithDouble:expireAt]
-    ];
+- (NSArray *)insertionRecordForConversation:(AVIMConversation *)conversation expireAt:(NSTimeInterval)expireAt
+{
+    id conversationId = conversation.conversationId;
+    
+    id name = (conversation.name
+               ?: [NSNull null]);
+    
+    id creator = (conversation.creator
+                  ?: [NSNull null]);
+    
+    id transient = [NSNumber numberWithBool:conversation.transient];
+    
+    id members = (conversation.members
+                  ? [conversation.members componentsJoinedByString:@","]
+                  : [NSNull null]);
+    
+    id attributes = (conversation.attributes
+                     ? [NSKeyedArchiver archivedDataWithRootObject:conversation.attributes]
+                     : [NSNull null]);
+    
+    id createAt = (conversation.createAt
+                   ? [NSNumber numberWithDouble:[conversation.createAt timeIntervalSince1970]]
+                   : [NSNull null]);
+    
+    id updateAt = (conversation.updateAt
+                   ? [NSNumber numberWithDouble:[conversation.updateAt timeIntervalSince1970]]
+                   : [NSNull null]);
+    
+    id lastMessageAt = (conversation.lastMessageAt
+                        ? [NSNumber numberWithDouble:[conversation.lastMessageAt timeIntervalSince1970]]
+                        : [NSNull null]);
+    
+    id lastMessage = (conversation.lastMessage
+                      ? [NSKeyedArchiver archivedDataWithRootObject:conversation.lastMessage]
+                      : [NSNull null]);
+    
+    id muted = [NSNumber numberWithBool:conversation.muted];
+    
+    NSDictionary *rawJSONData = conversation.rawJSONDataCopy;
+    
+    id rawDataDic = (rawJSONData
+                     ? [NSKeyedArchiver archivedDataWithRootObject:rawJSONData]
+                     : [NSNull null]);
+    
+    NSArray *array = @[
+                       conversationId,
+                       name,
+                       creator,
+                       transient,
+                       members,
+                       attributes,
+                       createAt,
+                       updateAt,
+                       lastMessageAt,
+                       lastMessage,
+                       muted,
+                       rawDataDic,
+                       [NSNumber numberWithDouble:expireAt]
+                       ];
+    
+    return array;
 }
 
 - (void)insertConversations:(NSArray *)conversations {
@@ -58,15 +96,20 @@
 
 - (void)insertConversations:(NSArray *)conversations maxAge:(NSTimeInterval)maxAge {
     NSTimeInterval expireAt = [[NSDate date] timeIntervalSince1970] + maxAge;
-
-    LCIM_OPEN_DATABASE(db, ({
-        for (AVIMConversation *conversation in conversations) {
-            if (!conversation.conversationId) continue;
-
-            NSArray *insertionRecord = [self insertionRecordForConversation:conversation expireAt:expireAt];
-            [db executeUpdate:LCIM_SQL_INSERT_CONVERSATION withArgumentsInArray:insertionRecord];
+    for (AVIMConversation *conversation in conversations) {
+        if (!conversation.conversationId) continue;
+        BOOL noMembers = (!conversation.members || conversation.members.count == 0);
+        if (noMembers) {
+            AVIMConversation *conversationInCache = [self conversationForId:conversation.conversationId];
+            if (noMembers && conversationInCache) {
+                conversation.members = conversationInCache.members;
+            }
         }
-    }));
+        NSArray *insertionRecord = [self insertionRecordForConversation:conversation expireAt:expireAt];
+        LCIM_OPEN_DATABASE(db, ({
+            [db executeUpdate:LCIM_SQL_INSERT_CONVERSATION withArgumentsInArray:insertionRecord];
+        }));
+    }
 }
 
 - (void)deleteConversation:(AVIMConversation *)conversation {
@@ -94,6 +137,20 @@
 - (void)deleteConversationAndItsMessagesForId:(NSString *)conversationId {
     [self deleteConversationForId:conversationId];
     [self deleteAllMessageOfConversationForId:conversationId];
+}
+
+- (void)updateConversationForLastMessageAt:(NSDate *)lastMessageAt conversationId:(NSString *)conversationId {
+    if (!conversationId || !lastMessageAt) return;
+    
+    NSNumber *lastMessageAtNumber = [NSNumber numberWithDouble:[lastMessageAt timeIntervalSince1970]];
+    
+    LCIM_OPEN_DATABASE(db, ({
+        NSArray *args = @[
+                          lastMessageAtNumber,
+                          conversationId,
+                          ];
+        [db executeUpdate:LCIM_SQL_UPDATE_CONVERSATION withArgumentsInArray:args];
+    }));
 }
 
 - (AVIMConversation *)conversationForId:(NSString *)conversationId timestamp:(NSTimeInterval)timestamp {
@@ -139,13 +196,50 @@
     return timeInterval ? [NSDate dateWithTimeIntervalSince1970:timeInterval] : nil;
 }
 
-- (AVIMConversation *)conversationWithResult:(LCResultSet *)result {
-    AVIMConversation *conversation = [[AVIMConversation alloc] init];
+- (AVIMConversation *)conversationWithResult:(LCResultSet *)result
+{
+    NSString *conversationId = [result stringForColumn:LCIM_FIELD_CONVERSATION_ID];
+    
+    NSDictionary *rawDataDic = ({
+        NSData *data = [result dataForColumn:LCIM_FIELD_RAW_DATA];
+        data ? [NSKeyedUnarchiver unarchiveObjectWithData:data] : nil;
+    });
+    
+    BOOL transient = [rawDataDic[kConvAttrKey_transient] boolValue];
+    BOOL system = [rawDataDic[kConvAttrKey_system] boolValue];
+    BOOL temporary = [rawDataDic[kConvAttrKey_temporary] boolValue];
+    
+    LCIMConvType convType = LCIMConvTypeUnknown;
+    
+    if (!transient && !system && !temporary) {
+        
+        convType = LCIMConvTypeNormal;
+        
+    } else if (transient && !system && !temporary) {
+        
+        convType = LCIMConvTypeTransient;
+        
+    } else if (!transient && system && !temporary) {
+        
+        convType = LCIMConvTypeSystem;
+        
+    } else if (!transient && !system && temporary) {
+        
+        convType = LCIMConvTypeTemporary;
+    }
 
-    conversation.conversationId = [result stringForColumn:LCIM_FIELD_CONVERSATION_ID];
+    AVIMConversation *conversation = [self.client getConversationWithId:conversationId
+                                                          orNewWithType:convType];
+    
+    if (!conversation) {
+        
+        return nil;
+    }
+    
+    [conversation setRawJSONData:[rawDataDic mutableCopy]];
+    
     conversation.name           = [result stringForColumn:LCIM_FIELD_NAME];
     conversation.creator        = [result stringForColumn:LCIM_FIELD_CREATOR];
-    conversation.transient      = [result boolForColumn:LCIM_FIELD_TRANSIENT];
     conversation.members        = [[result stringForColumn:LCIM_FIELD_MEMBERS] componentsSeparatedByString:@","];
     conversation.attributes     = ({
         NSData *data = [result dataForColumn:LCIM_FIELD_ATTRIBUTES];
@@ -154,8 +248,19 @@
     conversation.createAt       = [self dateFromTimeInterval:[result doubleForColumn:LCIM_FIELD_CREATE_AT]];
     conversation.updateAt       = [self dateFromTimeInterval:[result doubleForColumn:LCIM_FIELD_UPDATE_AT]];
     conversation.lastMessageAt  = [self dateFromTimeInterval:[result doubleForColumn:LCIM_FIELD_LAST_MESSAGE_AT]];
+    conversation.lastMessage    = ({
+        NSData *data = [result dataForColumn:LCIM_FIELD_LAST_MESSAGE];
+        data ? [NSKeyedUnarchiver unarchiveObjectWithData:data] : nil;
+    });
+    
     conversation.muted          = [result boolForColumn:LCIM_FIELD_MUTED];
 
+    conversation.temporaryTTL = [rawDataDic[kConvAttrKey_temporaryTTL] intValue];
+    
+    conversation.uniqueId = rawDataDic[kConvAttrKey_uniqueId];
+    
+    conversation.unique = [rawDataDic[kConvAttrKey_unique] boolValue];
+    
     return conversation;
 }
 
@@ -181,46 +286,20 @@
     return isOK ? conversations : @[];
 }
 
-- (NSArray *)allAliveConversations {
-    NSMutableArray *conversations = [NSMutableArray array];
-
-    LCIM_OPEN_DATABASE(db, ({
-        NSArray *args = @[[NSNumber numberWithDouble:[[NSDate date] timeIntervalSince1970]]];
-        LCResultSet *result = [db executeQuery:LCIM_SQL_SELECT_ALIVE_CONVERSATIONS withArgumentsInArray:args];
-
-        while ([result next]) {
-            [conversations addObject:[self conversationWithResult:result]];
-        }
-
-        [result close];
-    }));
-
-    return conversations;
-}
-
-- (NSArray *)allExpiredConversations {
-    NSMutableArray *conversations = [NSMutableArray array];
-
-    LCIM_OPEN_DATABASE(db, ({
-        NSArray *args = @[[NSNumber numberWithDouble:[[NSDate date] timeIntervalSince1970]]];
-        LCResultSet *result = [db executeQuery:LCIM_SQL_SELECT_EXPIRED_CONVERSATIONS withArgumentsInArray:args];
-
-        while ([result next]) {
-            [conversations addObject:[self conversationWithResult:result]];
-        }
-
-        [result close];
-    }));
-
-    return conversations;
-}
-
-- (void)cleanAllExpiredConversations {
-    NSArray *conversations = [self allExpiredConversations];
-
-    for (AVIMConversation *conversation in conversations) {
-        [self deleteConversation:conversation];
-    }
+- (void)cleanAllExpiredConversations
+{
+    [self.databaseQueue inDatabase:^(LCDatabase *db) {
+        
+        db.logsErrors = LCIM_SHOULD_LOG_ERRORS;
+        
+        NSString *sql = [self.class LCIM_SQL_Delete_Expired_Conversations];
+        
+        NSTimeInterval currentTimestamp = NSDate.date.timeIntervalSince1970;
+        
+        NSArray *args = @[@(currentTimestamp)];
+        
+        [db executeUpdate:sql withArgumentsInArray:args];
+    }];
 }
 
 @end

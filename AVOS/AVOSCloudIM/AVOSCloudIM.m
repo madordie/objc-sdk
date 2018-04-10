@@ -12,20 +12,15 @@
 
 @implementation AVOSCloudIM
 
-+ (void)registerForRemoteNotification {
-    [AVOSCloud registerForRemoteNotification];
-}
++ (AVIMOptions *)defaultOptions {
+    static AVIMOptions *options;
+    static dispatch_once_t onceToken;
 
-+ (void)registerForRemoteNotificationTypes:(NSUInteger)types categories:(NSSet *)categories {
-    [AVOSCloud registerForRemoteNotificationTypes:types categories:categories];
-}
+    dispatch_once(&onceToken, ^{
+        options = [[AVIMOptions alloc] init];
+    });
 
-+ (void)handleRemoteNotificationsWithDeviceToken:(NSData *)deviceToken constructingInstallationWithBlock:(void (^)(AVInstallation *))block {
-    [AVOSCloud handleRemoteNotificationsWithDeviceToken:deviceToken constructingInstallationWithBlock:block];
-}
-
-+ (void)handleRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
-    [AVOSCloud handleRemoteNotificationsWithDeviceToken:deviceToken];
+    return options;
 }
 
 @end
